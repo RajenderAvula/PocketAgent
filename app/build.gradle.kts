@@ -16,6 +16,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
+resValue("string", "app_name", "PocketAgent")
 
         val cloudApiKey = System.getenv("CLOUD_API_KEY") ?: ""
         buildConfigField("String", "CLOUD_API_KEY", "\"$cloudApiKey\"")
