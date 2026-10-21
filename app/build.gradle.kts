@@ -1,31 +1,38 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.0.0"
-    id("com.google.devtools.ksp") version "2.0.0-1.0.21"
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.devtools.ksp")
 }
 
 android {
     namespace = "com.personal.pocketagent"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.personal.pocketagent"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
 
-        buildConfigField("String", "CLOUD_API_KEY", "\"${System.getenv("CLOUD_API_KEY") ?: ""}\"")
+        val cloudApiKey = System.getenv("CLOUD_API_KEY") ?: ""
+        buildConfigField("String", "CLOUD_API_KEY", "\"$cloudApiKey\"")
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
     }
 
     buildFeatures {
         compose = true
         buildConfig = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.6.21"
     }
 }
 
