@@ -24,6 +24,8 @@ object MacroRecorder {
     fun captureEvent(event: AccessibilityEvent?) {
         if (!isRecording || event == null) return
         val pkg = event.packageName?.toString() ?: ""
+        
+        // Skip touches on our own app interface so we don't record the stop button
         if (pkg.contains("pocketagent", ignoreCase = true)) return
 
         val currentTime = System.currentTimeMillis()
@@ -36,16 +38,34 @@ object MacroRecorder {
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 val node = event.source ?: return
-                val text = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
+                val text = node.text?.toString()?.trim() ?: ""
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
                 val viewId = node.viewIdResourceName ?: ""
 
-                if (text.isNotBlank()) recordedSteps.add(MacroStep(action = "click_text", target = text))
-                else if (viewId.isNotBlank()) recordedSteps.add(MacroStep(action = "click_id", target = viewId))
+                when {
+                    text.isNotBlank() -> {
+                        recordedSteps.add(MacroStep(action = "click_text", target = text))
+                    }
+                    desc.isNotBlank() -> {
+                        recordedSteps.add(MacroStep(action = "click_text", target = desc))
+                    }
+                    viewId.isNotBlank() -> {
+                        recordedSteps.add(MacroStep(action = "click_id", target = viewId))
+                    }
+                    else -> {
+                        // Fallback step to prevent dropping taps on custom icon views
+                        val className = node.className?.toString()?.substringAfterLast('.') ?: "View"
+                        recordedSteps.add(MacroStep(action = "click_text", target = className))
+                    }
+                }
                 lastRecordedTime = System.currentTimeMillis()
             }
+
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
                 val text = event.text?.firstOrNull()?.toString() ?: ""
-                if (text.isNotBlank()) recordedSteps.add(MacroStep(action = "type_text", value = text))
+                if (text.isNotBlank()) {
+                    recordedSteps.add(MacroStep(action = "type_text", value = text))
+                }
                 lastRecordedTime = System.currentTimeMillis()
             }
         }
