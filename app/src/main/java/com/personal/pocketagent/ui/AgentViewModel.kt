@@ -2,6 +2,7 @@ package com.personal.pocketagent.ui
 
 import android.app.Application
 import android.content.Intent
+import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -54,8 +55,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     private val _speechRate = MutableStateFlow(AgentPrefs.getSpeechRate(application))
     val speechRate: StateFlow<Float> = _speechRate.asStateFlow()
 
+    private val _activePdfUri = MutableStateFlow<Uri?>(null)
+    val activePdfUri: StateFlow<Uri?> = _activePdfUri.asStateFlow()
+
     private val _messages = MutableStateFlow(
-        listOf(ChatMessage(text = "PocketAgent Ready.\n• Try: 'Send WhatsApp message to Mom saying I am on my way', 'Read from line 10', or pick a PDF/Word file below.", isUser = false, modeBadge = "SYSTEM"))
+        listOf(ChatMessage(text = "PocketAgent Ready.\n• Try: 'Send WhatsApp message to Mom', 'Close WhatsApp', 'Close Facebook', or attach a PDF to read line-by-line.", isUser = false, modeBadge = "SYSTEM"))
     )
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
@@ -68,10 +72,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         onListeningStateChange = { listening -> _isListening.value = listening }
     )
 
+    fun setActivePdfUri(uri: Uri?) {
+        _activePdfUri.value = uri
+    }
+
     fun refreshSystemStatus() {
         _accessibilityEnabled.value = AgentAccessibilityService.isRunning()
         _wakeServiceEnabled.value = WakeWordService.isRunning
         _overlayEnabled.value = FloatingOverlayService.isRunning
+        modelDownloader.checkExistingModel()
     }
 
     fun updateSpeechRate(newRate: Float) {
