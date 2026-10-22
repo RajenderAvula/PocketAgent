@@ -67,6 +67,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -140,6 +141,9 @@ class FloatingOverlayService : Service() {
         }
     }
 
+    /**
+     * Executes safe, non-crashing screen scraping and summarization on background threads.
+     */
     private fun readAndSummarizeCurrentScreen(customInstruction: String? = null) {
         val accessibility = AgentAccessibilityService.instance
         if (accessibility == null) {
@@ -151,44 +155,57 @@ class FloatingOverlayService : Service() {
 
         OverlayStateController.onScreenAnalysisStarted()
 
-        overlayScope.launch {
-            val screenText = accessibility.extractVisibleScreenText()
-            val instruction = customInstruction ?: "Summarize key points in 3 bullets or answer any question shown."
-            val (summary, badge) = router.analyzeScreenContent(screenText, instruction)
-            OverlayStateController.onScreenAnalysisResult(summary, badge)
-            voiceController.speak(summary)
+        overlayScope.launch(Dispatchers.Default) {
+            try {
+                val screenText = accessibility.extractVisibleScreenText()
+                val instruction = customInstruction ?: "Summarize key points in 3 bullets or answer any question shown."
+                val (summary, badge) = router.analyzeScreenContent(screenText, instruction)
+
+                withContext(Dispatchers.Main) {
+                    OverlayStateController.onScreenAnalysisResult(summary, badge)
+                    voiceController.speak(summary)
+                }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) {
+                    OverlayStateController.updateStatus("Screen read failed: ${t.localizedMessage ?: "Unknown error"}")
+                }
+            }
         }
     }
 
     private fun saveSummaryToNotes(summaryText: String) {
         if (summaryText.isBlank()) return
         overlayScope.launch(Dispatchers.IO) {
-            db.noteDao().insertNote(NoteEntity(content = "[Screen Summary]\n$summaryText"))
+            try {
+                db.noteDao().insertNote(NoteEntity(content = "[Screen Summary]\n$summaryText"))
 
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val fileName = "screen_summary_$timestamp.txt"
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val fileName = "screen_summary_$timestamp.txt"
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                    put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PocketAgent/ScreenSummaries")
-                }
-                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                uri?.let {
-                    contentResolver.openOutputStream(it)?.use { stream ->
-                        stream.write(summaryText.toByteArray(Charsets.UTF_8))
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                        put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PocketAgent/ScreenSummaries")
                     }
+                    val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    uri?.let {
+                        contentResolver.openOutputStream(it)?.use { stream ->
+                            stream.write(summaryText.toByteArray(Charsets.UTF_8))
+                        }
+                    }
+                } else {
+                    val dir = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                        "PocketAgent/ScreenSummaries"
+                    ).apply { mkdirs() }
+                    File(dir, fileName).writeText(summaryText, Charsets.UTF_8)
                 }
-            } else {
-                val dir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "PocketAgent/ScreenSummaries"
-                ).apply { mkdirs() }
-                File(dir, fileName).writeText(summaryText, Charsets.UTF_8)
-            }
 
-            OverlayStateController.updateStatus("Saved to Downloads/PocketAgent/ScreenSummaries!")
+                withContext(Dispatchers.Main) {
+                    OverlayStateController.updateStatus("Saved to Downloads/PocketAgent/ScreenSummaries!")
+                }
+            } catch (_: Exception) {}
         }
     }
 
