@@ -3,8 +3,11 @@ package com.personal.pocketagent.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -49,7 +52,7 @@ fun DocumentPlayerCard(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Header with Title and Fullscreen Button
+                // Header with Document Title, Fullscreen launcher, and Close (✕) button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -65,7 +68,7 @@ fun DocumentPlayerCard(
                     )
 
                     if (playerState.docUri != null && onOpenFullscreen != null) {
-                        IconButton(onClick = onOpenFullscreen, modifier = Modifier.size(28.dp)) {
+                        IconButton(onClick = onOpenFullscreen, modifier = Modifier.size(30.dp)) {
                             Icon(Icons.Default.Fullscreen, contentDescription = "View Fullscreen", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
@@ -73,24 +76,34 @@ fun DocumentPlayerCard(
                     Text(
                         text = "Line ${playerState.currentLineIndex + 1}/${playerState.totalLines}",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
+
+                    // Close Reader Button
+                    IconButton(
+                        onClick = { controller.closeDocument() },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close Document Reader", tint = MaterialTheme.colorScheme.error)
+                    }
                 }
 
-                // Spoken Line Preview
+                // UNTRUNCATED Spoken Line Display Box (Scrollable so all words are fully visible)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 40.dp, max = 110.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         .padding(10.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
                     Text(
                         text = playerState.currentLineText.ifEmpty { "(End of document)" },
                         style = MaterialTheme.typography.bodyMedium,
                         lineHeight = 20.sp,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
