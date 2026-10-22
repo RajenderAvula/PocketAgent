@@ -61,6 +61,28 @@ class MacroRecorderViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
+    /**
+     * Deletes a single step inside an already saved macro and updates Room immediately.
+     */
+    fun removeStepFromSavedMacro(triggerPhrase: String, stepIndex: Int) {
+        viewModelScope.launch {
+            val macro = macroDao.getMacro(triggerPhrase) ?: return@launch
+            try {
+                val steps = Json.decodeFromString<List<MacroStep>>(macro.stepsJson).toMutableList()
+                if (stepIndex in steps.indices) {
+                    steps.removeAt(stepIndex)
+                    if (steps.isEmpty()) {
+                        macroDao.deleteMacro(triggerPhrase)
+                    } else {
+                        macroDao.insertMacro(macro.copy(stepsJson = Json.encodeToString(steps)))
+                    }
+                    loadSavedMacros()
+                    PocketAgentWidget.refreshWidgets(getApplication())
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
     fun testMacroSteps(steps: List<MacroStep>, onStatus: (String) -> Unit) {
         viewModelScope.launch {
             val result = macroRunner.executeMacro(steps) { progress -> onStatus(progress) }
