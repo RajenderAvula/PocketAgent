@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.personal.pocketagent.automation.AgentAccessibilityService
 import com.personal.pocketagent.data.local.AgentDatabase
+import com.personal.pocketagent.data.local.AgentPrefs
 import com.personal.pocketagent.data.network.DownloadState
 import com.personal.pocketagent.data.network.ModelDownloader
 import com.personal.pocketagent.data.network.NetworkMonitor
@@ -47,8 +48,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     private val _overlayEnabled = MutableStateFlow(FloatingOverlayService.isRunning)
     val overlayEnabled: StateFlow<Boolean> = _overlayEnabled.asStateFlow()
 
+    private val _customWakeWords = MutableStateFlow(AgentPrefs.getCustomWakeWordsRaw(application))
+    val customWakeWords: StateFlow<String> = _customWakeWords.asStateFlow()
+
+    private val _speechRate = MutableStateFlow(AgentPrefs.getSpeechRate(application))
+    val speechRate: StateFlow<Float> = _speechRate.asStateFlow()
+
     private val _messages = MutableStateFlow(
-        listOf(ChatMessage(text = "PocketAgent Ready.\n• Try: 'Send WhatsApp message to Mom saying I am on my way', 'Find notes about physics', or 'Summarize this screen'.", isUser = false, modeBadge = "SYSTEM"))
+        listOf(ChatMessage(text = "PocketAgent Ready.\n• Try: 'Send WhatsApp message to Mom saying I am on my way', 'Read from line 10', or pick a PDF/Word file below.", isUser = false, modeBadge = "SYSTEM"))
     )
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
@@ -65,6 +72,17 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _accessibilityEnabled.value = AgentAccessibilityService.isRunning()
         _wakeServiceEnabled.value = WakeWordService.isRunning
         _overlayEnabled.value = FloatingOverlayService.isRunning
+    }
+
+    fun updateSpeechRate(newRate: Float) {
+        _speechRate.value = newRate
+        voiceController.setSpeechRate(newRate)
+        AgentPrefs.setSpeechRate(getApplication(), newRate)
+    }
+
+    fun updateCustomWakeWords(newWords: String) {
+        _customWakeWords.value = newWords
+        AgentPrefs.setCustomWakeWordsRaw(getApplication(), newWords)
     }
 
     fun startOfflineModelDownload(customUrl: String = ModelDownloader.DEFAULT_MODEL_URL, hfToken: String? = null) {
