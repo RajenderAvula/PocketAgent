@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.personal.pocketagent.automation.AgentAccessibilityService
 import com.personal.pocketagent.domain.model.MacroStep
 import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
@@ -76,7 +77,6 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        // Unified LazyColumn enables complete, fluid vertical scrolling across all screen contents
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -111,7 +111,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                 }
             }
 
-            // Section 2: Live Screen Recorder & Staged Steps Review
+            // Section 2: Live Screen Recorder Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -125,7 +125,13 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                         )
 
                         Button(
-                            onClick = { viewModel.toggleRecording() },
+                            onClick = {
+                                if (!isRecording && !AgentAccessibilityService.isRunning()) {
+                                    previewStatus = "Please enable 'UI Tap' in Accessibility first!"
+                                } else {
+                                    viewModel.toggleRecording()
+                                }
+                            },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                             ),
@@ -137,7 +143,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                         }
 
                         if (stagedSteps.isNotEmpty() && !isRecording) {
-                            Text("Review Recorded Steps (${stagedSteps.size})", style = MaterialTheme.typography.titleSmall)
+                            Text("Captured Steps (${stagedSteps.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
 
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 stagedSteps.forEachIndexed { index, step ->
@@ -182,26 +188,27 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                             OutlinedTextField(
                                 value = triggerInput,
                                 onValueChange = { triggerInput = it },
-                                label = { Text("Voice Trigger (e.g. 'clean routine')") },
+                                label = { Text("Voice Trigger (e.g. 'morning routine')") },
                                 modifier = Modifier.fillMaxWidth()
                             )
 
                             Button(
                                 onClick = {
-                                    viewModel.saveMacro(triggerInput, stagedSteps)
+                                    val trigger = triggerInput.ifBlank { "custom routine ${savedMacros.size + 1}" }
+                                    viewModel.saveMacro(trigger, stagedSteps)
                                     triggerInput = ""
                                     previewStatus = ""
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Save Verified Routine")
+                                Text("Save Routine")
                             }
                         }
                     }
                 }
             }
 
-            // Section 3: Header for Saved Macros
+            // Section 3: Header for Saved Routines
             item {
                 Text(
                     text = "Saved Routines (${savedMacros.size})",
@@ -210,7 +217,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                 )
             }
 
-            // Section 4: Expandable Saved Macros with Step Deletion & Live Testing
+            // Section 4: Expandable Saved Macros List
             items(savedMacros, key = { it.triggerPhrase }) { macro ->
                 var isExpanded by remember { mutableStateOf(false) }
                 val steps = remember(macro.stepsJson) {
@@ -226,7 +233,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("\"${macro.triggerPhrase}\"", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("${steps.size} step(s) • Tap to view & edit steps", style = MaterialTheme.typography.bodySmall)
+                                Text("${steps.size} step(s) • Tap arrow to view & delete steps", style = MaterialTheme.typography.bodySmall)
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 TextButton(onClick = { viewModel.testMacroSteps(steps) { previewStatus = it } }) {
