@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.personal.pocketagent.automation.MacroRecorder
+import com.personal.pocketagent.automation.MacroRunner
 import com.personal.pocketagent.data.backup.BackupManager
 import com.personal.pocketagent.data.local.AgentDatabase
 import com.personal.pocketagent.data.local.MacroEntity
@@ -21,6 +22,7 @@ class MacroRecorderViewModel(application: Application) : AndroidViewModel(applic
     private val db = AgentDatabase.get(application)
     private val macroDao = db.macroDao()
     private val backupManager = BackupManager(application)
+    private val macroRunner = MacroRunner(application)
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
@@ -48,6 +50,24 @@ class MacroRecorderViewModel(application: Application) : AndroidViewModel(applic
         } else {
             MacroRecorder.startRecording()
             _isRecording.value = true
+        }
+    }
+
+    fun removeStagedStep(index: Int) {
+        val current = _stagedSteps.value.toMutableList()
+        if (index in current.indices) {
+            current.removeAt(index)
+            _stagedSteps.value = current
+        }
+    }
+
+    fun testMacroSteps(steps: List<MacroStep>, onStatus: (String) -> Unit) {
+        viewModelScope.launch {
+            val result = macroRunner.executeMacro(steps) { progress -> onStatus(progress) }
+            result.fold(
+                onSuccess = { onStatus("✓ Preview test succeeded!") },
+                onFailure = { onStatus("✗ Test failed: ${it.localizedMessage}") }
+            )
         }
     }
 
