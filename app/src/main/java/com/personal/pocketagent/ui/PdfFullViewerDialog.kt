@@ -3,7 +3,6 @@ package com.personal.pocketagent.ui
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -31,7 +30,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -71,9 +69,10 @@ fun PdfFullViewerDialog(
 
     // Annotation and Drawer States
     var isAnnotationMode by remember { mutableStateOf(false) }
-    var penColor by remember { mutableStateOf(Color(0x80FFEB3B)) } // Default translucent yellow highlighter
+    var penColor by remember { mutableStateOf(Color(0x80FFEB3B)) } // Translucent yellow highlighter
     val strokes = remember { mutableStateListOf<AnnotationStroke>() }
     var currentPath by remember { mutableStateOf<Path?>(null) }
+    var drawTrigger by remember { mutableLongStateOf(0L) }
     var showTranscriptDrawer by remember { mutableStateOf(false) }
 
     LaunchedEffect(pdfUri) {
@@ -121,7 +120,9 @@ fun PdfFullViewerDialog(
                         text = playerState.title.ifEmpty { "PDF Viewer" },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f).padding(start = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 8.dp),
                         maxLines = 1
                     )
 
@@ -144,7 +145,11 @@ fun PdfFullViewerDialog(
                             CircleShape
                         )
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = "Draw / Highlight", tint = if (isAnnotationMode) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Draw / Highlight",
+                            tint = if (isAnnotationMode) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                        )
                     }
 
                     // Jump to Line / Transcript Drawer Toggle
@@ -164,8 +169,8 @@ fun PdfFullViewerDialog(
                     }
                 }
 
-                // Annotation Palette Bar (shown only when editing/marking)
-                AnimatedVisibility(visible = isAnnotationMode) {
+                // Annotation Palette Bar
+                if (isAnnotationMode) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -200,7 +205,7 @@ fun PdfFullViewerDialog(
                     }
                 }
 
-                // Document Body with Zoom, Pan, and Canvas Annotation Overlay
+                // Document Body with Zoom, Pan, Canvas Overlay, and Jump Drawer
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -261,18 +266,34 @@ fun PdfFullViewerDialog(
                                             onDragStart = { startPos ->
                                                 val p = Path().apply { moveTo(startPos.x, startPos.y) }
                                                 currentPath = p
-                                                strokes.add(AnnotationStroke(p, penColor, if (penColor == Color(0xFFEF4444)) 5f else 28f))
+                                                strokes.add(
+                                                    AnnotationStroke(
+                                                        p,
+                                                        penColor,
+                                                        if (penColor == Color(0xFFEF4444)) 5f else 28f
+                                                    )
+                                                )
+                                                drawTrigger++
                                             },
                                             onDrag = { change, _ ->
                                                 change.consume()
                                                 currentPath?.lineTo(change.position.x, change.position.y)
+                                                drawTrigger++
                                             },
-                                            onDragEnd = { currentPath = null },
-                                            onDragCancel = { currentPath = null }
+                                            onDragEnd = {
+                                                currentPath = null
+                                                drawTrigger++
+                                            },
+                                            onDragCancel = {
+                                                currentPath = null
+                                                drawTrigger++
+                                            }
                                         )
                                     }
                                 }
                         ) {
+                            @Suppress("UNUSED_VARIABLE")
+                            val trigger = drawTrigger
                             for (stroke in strokes) {
                                 drawPath(
                                     path = stroke.path,
@@ -287,13 +308,11 @@ fun PdfFullViewerDialog(
                         }
                     }
 
-                    // Transcript / Jump-to-Line Drawer (Tap any line to move reading cursor there)
-                    AnimatedVisibility(
-                        visible = showTranscriptDrawer,
-                        modifier = Modifier.align(Alignment.CenterEnd)
-                    ) {
+                    // Transcript / Jump-to-Line Drawer
+                    if (showTranscriptDrawer) {
                         Surface(
                             modifier = Modifier
+                                .align(Alignment.CenterEnd)
                                 .width(280.dp)
                                 .fillMaxHeight(),
                             color = MaterialTheme.colorScheme.surfaceVariant,
