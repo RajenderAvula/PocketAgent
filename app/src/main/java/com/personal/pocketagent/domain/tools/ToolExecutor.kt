@@ -10,6 +10,7 @@ import com.personal.pocketagent.data.local.NoteDao
 import com.personal.pocketagent.data.local.NoteEntity
 import com.personal.pocketagent.domain.engine.HybridAgentRouter
 import com.personal.pocketagent.domain.model.AgentAction
+import com.personal.pocketagent.playback.DocumentPlaybackController
 
 class ToolExecutor(
     private val context: Context,
@@ -32,6 +33,23 @@ class ToolExecutor(
         }
 
         return when (action.tool) {
+            "doc_control" -> {
+                val controller = DocumentPlaybackController.getInstance(context)
+                val cmd = action.args["command"] ?: "pause"
+                when (cmd) {
+                    "pause" -> controller.pause()
+                    "resume" -> controller.play()
+                    "stop" -> controller.stop()
+                    "next" -> controller.nextLine()
+                    "previous" -> controller.previousLine()
+                    "seek" -> {
+                        val targetIndex = action.args["line"]?.toIntOrNull() ?: 0
+                        controller.seekTo(targetIndex)
+                        controller.play()
+                    }
+                }
+                action.spokenResponse
+            }
             "set_alarm" -> {
                 val hour = action.args["hour"]?.toIntOrNull() ?: return "Invalid hour."
                 val minute = action.args["minute"]?.toIntOrNull() ?: 0
@@ -112,13 +130,44 @@ class ToolExecutor(
     }
 
     private fun launchAppByName(targetName: String): Boolean {
-        val pm = context.packageManager
+        val cleanName = targetName.lowercase()
+            .replace("'", "")
+            .replace(" ", "")
+            .trim()
+
+        val knownPackages = mapOf(
+            "whatsapp" to listOf("com.whatsapp", "com.whatsapp.w4b"),
+            "youtube" to listOf("com.google.android.youtube"),
+            "chrome" to listOf("com.android.chrome"),
+            "settings" to listOf("com.android.settings"),
+            "spotify" to listOf("com.spotify.music")
+        )
+
+        val packageManager = context.packageManager
+
+        knownPackages[cleanName]?.forEach { pkg ->
+            val intent = packageManager.getLaunchIntentForPackage(pkg)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                context.startActivity(intent)
+                return true
+            }
+        }
+
         val mainIntent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
-        val apps = pm.queryIntentActivities(mainIntent, 0)
-        val match = apps.firstOrNull { it.loadLabel(pm).toString().contains(targetName, ignoreCase = true) } ?: return false
-        val launchIntent = pm.getLaunchIntentForPackage(match.activityInfo.packageName)
-        launchIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        context.startActivity(launchIntent)
-        return true
+        val apps = packageManager.queryIntentActivities(mainIntent, 0)
+        val match = apps.firstOrNull {
+            val label = it.loadLabel(packageManager).toString().lowercase().replace(" ", "")
+            label.contains(cleanName) || cleanName.contains(label)
+        }
+
+        if (match != null) {
+            val launchIntent = packageManager.getLaunchIntentForPackage(match.activityInfo.packageName)
+            launchIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            context.startActivity(launchIntent)
+            return true
+        }
+
+        return false
     }
 }
