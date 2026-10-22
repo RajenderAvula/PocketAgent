@@ -97,6 +97,7 @@ class ModelDownloader(private val context: Context) {
     companion object {
         const val MODEL_FILENAME = "gemma-2b-it-int4.bin"
         const val DEFAULT_MODEL_URL =
-            "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/gemma2_2b_it_gpu_int8.bin"
+            /*"https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/gemma2_2b_it_gpu_int8.bin"*/
+"https://huggingface.co/alexdlov/gemma2-2b-it-gpu-int8.bin"
     }
 }
