@@ -181,41 +181,50 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Extracts visible screen text without crashing, locking, or overflowing the Binder transaction buffer.
+     * Robust extraction of visible foreground screen content without crashing or hanging.
      */
     fun extractVisibleScreenText(maxChars: Int = 3500): String {
         return try {
-            val targetRoot = findUnderlyingAppRoot() ?: rootInActiveWindow ?: return ""
-            val packageName = targetRoot.packageName?.toString() ?: "unknown.app"
-
             val collectedLines = LinkedHashSet<String>()
-            collectNodeTextSafely(targetRoot, collectedLines, depth = 0)
+            val activeRoot = rootInActiveWindow
+            val windowsList = try { windows } catch (_: Throwable) { null }
 
-            if (collectedLines.isEmpty()) return ""
-            ("App: $packageName\n" + collectedLines.joinToString("\n")).take(maxChars)
+            var targetRoot: AccessibilityNodeInfo? = null
+
+            // Prioritize underlying app windows first
+            if (!windowsList.isNullOrEmpty()) {
+                for (w in windowsList) {
+                    val root = try { w.root } catch (_: Throwable) { null } ?: continue
+                    val pkg = root.packageName?.toString() ?: ""
+                    if (pkg.isNotBlank() && !pkg.contains("pocketagent", ignoreCase = true)) {
+                        targetRoot = root
+                        break
+                    }
+                }
+            }
+
+            if (targetRoot == null) {
+                targetRoot = activeRoot
+            }
+
+            if (targetRoot != null) {
+                val packageName = targetRoot.packageName?.toString() ?: "Screen"
+                collectNodeTextSafely(targetRoot, collectedLines, depth = 0)
+                if (collectedLines.isNotEmpty()) {
+                    ("App: $packageName\n" + collectedLines.joinToString("\n")).take(maxChars)
+                } else {
+                    "No visible readable text on this screen."
+                }
+            } else {
+                "Unable to access active window. Please ensure accessibility is enabled."
+            }
         } catch (t: Throwable) {
             "Screen reading completed: Content could not be parsed (${t.message ?: "active window unavailable"})."
         }
     }
 
-    private fun findUnderlyingAppRoot(): AccessibilityNodeInfo? {
-        return try {
-            val currentWindows = windows ?: return null
-            for (window in currentWindows) {
-                val root = try { window.root } catch (_: Throwable) { null } ?: continue
-                val pkg = root.packageName?.toString() ?: ""
-                if (pkg.isNotEmpty() && !pkg.contains("pocketagent", ignoreCase = true)) {
-                    return root
-                }
-            }
-            null
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
     private fun collectNodeTextSafely(node: AccessibilityNodeInfo?, output: MutableSet<String>, depth: Int) {
-        if (node == null || depth > 20 || output.size > 80) return
+        if (node == null || depth > 20 || output.size > 100) return
         try {
             if (!node.isVisibleToUser) return
             val text = node.text?.toString()?.trim()
