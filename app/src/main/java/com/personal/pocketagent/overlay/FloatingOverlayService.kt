@@ -4,11 +4,14 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
+import android.provider.MediaStore
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
@@ -24,6 +27,8 @@ import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
@@ -36,6 +41,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,6 +58,8 @@ import com.personal.pocketagent.domain.engine.CloudLlmEngine
 import com.personal.pocketagent.domain.engine.HybridAgentRouter
 import com.personal.pocketagent.domain.engine.OfflineLlmEngine
 import com.personal.pocketagent.domain.tools.ToolExecutor
+import com.personal.pocketagent.playback.DocumentPlaybackController
+import com.personal.pocketagent.playback.PlaybackState
 import com.personal.pocketagent.system.AgentTileService
 import com.personal.pocketagent.voice.VoiceController
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +67,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 class FloatingOverlayService : Service() {
@@ -150,9 +162,33 @@ class FloatingOverlayService : Service() {
 
     private fun saveSummaryToNotes(summaryText: String) {
         if (summaryText.isBlank()) return
-        overlayScope.launch {
+        overlayScope.launch(Dispatchers.IO) {
             db.noteDao().insertNote(NoteEntity(content = "[Screen Summary]\n$summaryText"))
-            OverlayStateController.updateStatus("Saved summary to Notes!")
+
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val fileName = "screen_summary_$timestamp.txt"
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PocketAgent/ScreenSummaries")
+                }
+                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                uri?.let {
+                    contentResolver.openOutputStream(it)?.use { stream ->
+                        stream.write(summaryText.toByteArray(Charsets.UTF_8))
+                    }
+                }
+            } else {
+                val dir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    "PocketAgent/ScreenSummaries"
+                ).apply { mkdirs() }
+                File(dir, fileName).writeText(summaryText, Charsets.UTF_8)
+            }
+
+            OverlayStateController.updateStatus("Saved to Downloads/PocketAgent/ScreenSummaries!")
         }
     }
 
@@ -255,6 +291,10 @@ private fun FloatingBubbleContent(
     val uiState by OverlayStateController.uiState.collectAsState()
     var isExpanded by remember { mutableStateOf(true) }
 
+    val context = LocalContext.current
+    val playbackController = remember { DocumentPlaybackController.getInstance(context) }
+    val docPlayerState by playbackController.playerState.collectAsState()
+
     val containerColor = when {
         uiState.isListening -> Color(0xFF7F1D1D)
         uiState.isAnalyzingScreen -> Color(0xFF312E81)
@@ -306,6 +346,23 @@ private fun FloatingBubbleContent(
                             CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                         } else {
                             Icon(Icons.Default.Visibility, contentDescription = "Read Screen", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+                    }
+
+                    if (docPlayerState.lines.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                if (docPlayerState.state == PlaybackState.PLAYING) playbackController.pause()
+                                else playbackController.play()
+                            },
+                            modifier = Modifier.size(36.dp).background(Color(0xFF334155), shape = CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = if (docPlayerState.state == PlaybackState.PLAYING) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Toggle Document Audio",
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
