@@ -20,7 +20,11 @@ class ToolExecutor(
     private val macroRunner = MacroRunner(context)
     private val backupManager = BackupManager(context)
 
-    suspend fun execute(action: AgentAction, onStepProgress: (String) -> Unit = {}): String {
+    suspend fun execute(
+        action: AgentAction,
+        onStepProgress: (String) -> Unit = {}
+    ): String {
+        // Multi-step macro runner execution
         if (action.tool == "run_macro" || action.steps.isNotEmpty()) {
             if (!AgentAccessibilityService.isRunning()) {
                 return "Please enable 'UI Tap' Accessibility first so I can automate app routines."
@@ -33,6 +37,23 @@ class ToolExecutor(
         }
 
         return when (action.tool) {
+            "open_app" -> {
+                val appName = action.args["app_name"] ?: return "No app specified to open."
+                if (launchAppByName(appName)) action.spokenResponse
+                else "Could not find an app named '$appName'."
+            }
+
+            "close_app" -> {
+                val appName = action.args["app_name"] ?: "this app"
+                val service = AgentAccessibilityService.instance
+                if (service != null) {
+                    service.executeGlobalCommand("home")
+                    "Closed $appName."
+                } else {
+                    "Please enable Accessibility to close apps."
+                }
+            }
+
             "doc_control" -> {
                 val controller = DocumentPlaybackController.getInstance(context)
                 val cmd = action.args["command"] ?: "pause"
@@ -50,70 +71,87 @@ class ToolExecutor(
                 }
                 action.spokenResponse
             }
+
             "set_alarm" -> {
-                val hour = action.args["hour"]?.toIntOrNull() ?: return "Invalid hour."
+                val hour = action.args["hour"]?.toIntOrNull() ?: return "Invalid hour for alarm."
                 val minute = action.args["minute"]?.toIntOrNull() ?: 0
                 val label = action.args["label"] ?: "Agent Alarm"
                 setSystemAlarm(hour, minute, label)
                 action.spokenResponse
             }
+
             "save_note" -> {
-                val content = action.args["content"] ?: return "Note was empty."
+                val content = action.args["content"] ?: return "Note content was empty."
                 noteDao.insertNote(NoteEntity(content = content))
                 action.spokenResponse
             }
+
             "list_notes" -> {
                 val notes = noteDao.getAllNotes()
                 if (notes.isEmpty()) "You have no saved notes."
                 else "Your latest notes:\n" + notes.joinToString("\n") { "• ${it.content}" }
             }
-            "open_app" -> {
-                val appName = action.args["app_name"] ?: return "No app name specified."
-                if (launchAppByName(appName)) action.spokenResponse
-                else "Could not find app '$appName'."
-            }
+
             "click_text" -> {
-                val service = AgentAccessibilityService.instance ?: return "Accessibility is disabled."
-                val target = action.args["target"] ?: return "Specify text to click."
+                val service = AgentAccessibilityService.instance
+                    ?: return "Accessibility Service is disabled. Enable 'UI Tap' first."
+                val target = action.args["target"] ?: return "Specify text or button to click."
                 if (service.clickNodeByText(target)) action.spokenResponse
                 else "Could not find '$target' on screen."
             }
+
             "type_text" -> {
-                val service = AgentAccessibilityService.instance ?: return "Accessibility is disabled."
+                val service = AgentAccessibilityService.instance
+                    ?: return "Accessibility Service is disabled. Enable 'UI Tap' first."
                 val text = action.args["text"] ?: return "No text provided to type."
                 if (service.inputTextIntoField(text)) action.spokenResponse
                 else "No editable field found on screen."
             }
+
             "global_action" -> {
-                val service = AgentAccessibilityService.instance ?: return "Accessibility is disabled."
+                val service = AgentAccessibilityService.instance
+                    ?: return "Accessibility Service is disabled. Enable 'UI Tap' first."
                 val command = action.args["command"] ?: "home"
                 if (service.executeGlobalCommand(command)) action.spokenResponse
-                else "Failed to execute '$command'."
+                else "Failed to execute global action '$command'."
             }
+
             "backup_data" -> {
-                backupManager.exportToDownloadsFolder().getOrElse { "Backup failed: ${it.localizedMessage}" }
+                backupManager.exportToDownloadsFolder().getOrElse {
+                    "Backup failed: ${it.localizedMessage}"
+                }
             }
+
             "ask_notes" -> {
-                val rawQuery = action.args["query"] ?: return "Specify what to search for."
+                val rawQuery = action.args["query"] ?: return "Specify what to search for in your notes."
                 val fullQuestion = action.args["full_question"] ?: rawQuery
                 val ftsQuery = router?.buildFtsQuery(rawQuery) ?: "$rawQuery*"
 
                 val matched = try {
-                    noteDao.searchNotesFts(ftsQuery).ifEmpty { noteDao.searchNotesSubstring(rawQuery) }
+                    noteDao.searchNotesFts(ftsQuery).ifEmpty {
+                        noteDao.searchNotesSubstring(rawQuery)
+                    }
                 } catch (_: Exception) {
                     noteDao.searchNotesSubstring(rawQuery)
                 }
 
-                if (router != null) router.answerFromNotes(fullQuestion, matched)
-                else if (matched.isEmpty()) "No notes matched '$rawQuery'."
-                else "Matching notes:\n" + matched.joinToString("\n") { "• ${it.content}" }
+                if (router != null) {
+                    router.answerFromNotes(fullQuestion, matched)
+                } else if (matched.isEmpty()) {
+                    "No saved notes matched '$rawQuery'."
+                } else {
+                    "Matching notes:\n" + matched.joinToString("\n") { "• ${it.content}" }
+                }
             }
+
             "analyze_screen" -> {
-                val service = AgentAccessibilityService.instance ?: return "Accessibility disabled."
+                val service = AgentAccessibilityService.instance
+                    ?: return "Accessibility Service is disabled. Enable 'UI Tap' first."
                 val screenDump = service.extractVisibleScreenText()
-                if (screenDump.isBlank()) "No readable text found on screen."
+                if (screenDump.isBlank()) "No readable text found on the active screen."
                 else "SCREEN_DUMP::$screenDump"
             }
+
             else -> action.spokenResponse
         }
     }
@@ -135,15 +173,18 @@ class ToolExecutor(
             .replace(" ", "")
             .trim()
 
+        val packageManager = context.packageManager
+
+        // Direct package shortcuts for popular and built-in apps
         val knownPackages = mapOf(
             "whatsapp" to listOf("com.whatsapp", "com.whatsapp.w4b"),
+            "facebook" to listOf("com.facebook.katana", "com.facebook.lite"),
             "youtube" to listOf("com.google.android.youtube"),
+            "instagram" to listOf("com.instagram.android"),
             "chrome" to listOf("com.android.chrome"),
             "settings" to listOf("com.android.settings"),
             "spotify" to listOf("com.spotify.music")
         )
-
-        val packageManager = context.packageManager
 
         knownPackages[cleanName]?.forEach { pkg ->
             val intent = packageManager.getLaunchIntentForPackage(pkg)
@@ -154,15 +195,18 @@ class ToolExecutor(
             }
         }
 
-        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
+        // Universal scan across all installed launchable apps on device
+        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
         val apps = packageManager.queryIntentActivities(mainIntent, 0)
-        val match = apps.firstOrNull {
-            val label = it.loadLabel(packageManager).toString().lowercase().replace(" ", "")
+        val matchedApp = apps.firstOrNull { resolveInfo ->
+            val label = resolveInfo.loadLabel(packageManager).toString().lowercase().replace(" ", "")
             label.contains(cleanName) || cleanName.contains(label)
         }
 
-        if (match != null) {
-            val launchIntent = packageManager.getLaunchIntentForPackage(match.activityInfo.packageName)
+        if (matchedApp != null) {
+            val launchIntent = packageManager.getLaunchIntentForPackage(matchedApp.activityInfo.packageName)
             launchIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             context.startActivity(launchIntent)
             return true
