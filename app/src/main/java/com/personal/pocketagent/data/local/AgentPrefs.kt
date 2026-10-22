@@ -9,7 +9,10 @@ object AgentPrefs {
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     private const val KEY_SPEECH_RATE = "tts_speech_rate"
     private const val KEY_CUSTOM_WAKE_WORDS = "custom_wake_words"
+    private const val KEY_EXCLUDED_WORDS = "excluded_words_pdf"
+
     private const val DEFAULT_WAKE_WORDS = "hey agent, okay agent, pocket agent, hey man, dude, man"
+    private const val DEFAULT_EXCLUDED_WORDS = "http*, https*, www.*, page *, [*, *]"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -55,5 +58,19 @@ object AgentPrefs {
             .map { it.trim().lowercase() }
             .filter { it.isNotBlank() }
             .sortedByDescending { it.length }
+    }
+
+    fun getExcludedWordsRaw(context: Context): String =
+        prefs(context).getString(KEY_EXCLUDED_WORDS, DEFAULT_EXCLUDED_WORDS) ?: DEFAULT_EXCLUDED_WORDS
+
+    fun setExcludedWordsRaw(context: Context, raw: String) {
+        prefs(context).edit().putString(KEY_EXCLUDED_WORDS, raw).apply()
+    }
+
+    fun getExcludedWordsList(context: Context): List<String> {
+        return getExcludedWordsRaw(context)
+            .split(",")
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() }
     }
 }
