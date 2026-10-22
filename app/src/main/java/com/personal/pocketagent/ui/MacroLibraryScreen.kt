@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.SimpleDateFormat
@@ -30,6 +31,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
     val statusMessage by viewModel.statusMessage.collectAsState()
 
     var triggerInput by remember { mutableStateOf("") }
+    var previewStatus by remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(statusMessage) {
@@ -102,7 +104,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
                         text = if (isRecording) "Recording live actions... Perform your routine across any app!"
-                        else "Record or create a sequence of actions tied to a voice trigger.",
+                        else "Record or edit a sequence of actions tied to a voice trigger.",
                         style = MaterialTheme.typography.bodyMedium
                     )
 
@@ -119,21 +121,62 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                     }
 
                     if (stagedSteps.isNotEmpty() && !isRecording) {
-                        Text("Captured ${stagedSteps.size} steps!", color = MaterialTheme.colorScheme.primary)
+                        Text("Review Recorded Steps (${stagedSteps.size})", style = MaterialTheme.typography.titleSmall)
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            stagedSteps.forEachIndexed { index, step ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("${index + 1}.", fontWeight = FontWeight.Bold, modifier = Modifier.width(24.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(step.action, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                                            Text(
+                                                text = if (step.target.isNotBlank()) "Target: ${step.target}" else "Value: ${step.value}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.outline
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.removeStagedStep(index) }) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Remove Step", tint = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = { viewModel.testMacroSteps(stagedSteps) { previewStatus = it } },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("▶ Test / Preview Macro Live")
+                        }
+
+                        if (previewStatus.isNotBlank()) {
+                            Text(previewStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
+
                         OutlinedTextField(
                             value = triggerInput,
                             onValueChange = { triggerInput = it },
-                            label = { Text("Voice Trigger (e.g. 'good morning routine')") },
+                            label = { Text("Voice Trigger (e.g. 'clean routine')") },
                             modifier = Modifier.fillMaxWidth()
                         )
+
                         Button(
                             onClick = {
                                 viewModel.saveMacro(triggerInput, stagedSteps)
                                 triggerInput = ""
+                                previewStatus = ""
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Save Routine")
+                            Text("Save Verified Routine")
                         }
                     }
                 }
