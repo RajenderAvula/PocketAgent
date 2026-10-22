@@ -20,7 +20,7 @@ class HybridAgentRouter(
     private val systemPrompt = """
         You are a personal Android agent with multi-step screen macro automation. Respond ONLY in strict JSON:
         {
-          "tool": "run_macro|set_alarm|save_note|list_notes|open_app|click_text|type_text|global_action|chat_reply|ask_notes|analyze_screen",
+          "tool": "run_macro|set_alarm|save_note|list_notes|open_app|click_text|type_text|global_action|chat_reply|ask_notes|analyze_screen|doc_control",
           "args": {"key": "value"},
           "steps": [
             {"action": "open_app|click_text|click_id|type_text|wait_ms|global_action|ime_enter", "target": "...", "value": "...", "timeoutMs": 6000}
@@ -74,6 +74,33 @@ class HybridAgentRouter(
     private fun parseFastReflex(input: String): AgentAction? {
         val trimmed = input.trim()
         val lower = trimmed.lowercase()
+
+        // Document playback control reflexes
+        if (lower == "pause" || lower == "pause reading" || lower == "pause document" || lower == "hold on") {
+            return AgentAction(tool = "doc_control", args = mapOf("command" to "pause"), spokenResponse = "Paused.")
+        }
+        if (lower == "resume" || lower == "resume reading" || lower == "continue reading" || lower == "keep reading") {
+            return AgentAction(tool = "doc_control", args = mapOf("command" to "resume"), spokenResponse = "Resuming.")
+        }
+        if (lower == "stop reading" || lower == "stop document" || lower == "cancel reading") {
+            return AgentAction(tool = "doc_control", args = mapOf("command" to "stop"), spokenResponse = "Stopped reading.")
+        }
+        if (lower == "next line" || lower == "skip line") {
+            return AgentAction(tool = "doc_control", args = mapOf("command" to "next"), spokenResponse = "Next line.")
+        }
+        if (lower == "previous line" || lower == "go back a line" || lower == "repeat line") {
+            return AgentAction(tool = "doc_control", args = mapOf("command" to "previous"), spokenResponse = "Previous line.")
+        }
+
+        val jumpLineRegex = Regex("^(?:read|start|jump|go)\\s+(?:from|to)\\s+line\\s+(\\d+)", RegexOption.IGNORE_CASE)
+        jumpLineRegex.find(trimmed)?.let { match ->
+            val lineNumber = match.groupValues[1].toIntOrNull() ?: 1
+            return AgentAction(
+                tool = "doc_control",
+                args = mapOf("command" to "seek", "line" to (lineNumber - 1).coerceAtLeast(0).toString()),
+                spokenResponse = "Reading from line $lineNumber."
+            )
+        }
 
         val searchNotesRegex = Regex(
             "^(?:search\\s+(?:my\\s+)?notes\\s+(?:for|about)|find\\s+(?:in\\s+)?(?:my\\s+)?notes\\s+(?:about|for|on)?|what\\s+did\\s+i\\s+(?:note|save|write)\\s+about|ask\\s+(?:my\\s+)?notes)\\s+(.+)",
