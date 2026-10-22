@@ -120,6 +120,14 @@ class DocumentPlaybackController private constructor(private val context: Contex
         )
     }
 
+    /**
+     * Completely closes the document and hides the card.
+     */
+    fun closeDocument() {
+        tts?.stop()
+        _playerState.value = DocumentPlayerState()
+    }
+
     fun seekTo(index: Int) {
         val current = _playerState.value
         if (current.lines.isEmpty()) return
@@ -152,7 +160,32 @@ class DocumentPlaybackController private constructor(private val context: Contex
         val lines = _playerState.value.lines
         if (index !in lines.indices) return
 
-        val lineText = lines[index]
+        var lineText = lines[index]
+        
+        // Sanitize excluded words configured by user (e.g. citations, URLs, page headers)
+        val exclusions = AgentPrefs.getExcludedWordsList(context)
+        for (ex in exclusions) {
+            if (ex.contains("*")) {
+                val regexPattern = "\\b" + Regex.escape(ex).replace("\\*", ".*?") + "\\b"
+                lineText = lineText.replace(Regex(regexPattern, RegexOption.IGNORE_CASE), "")
+            } else {
+                lineText = lineText.replace(Regex("\\b" + Regex.escape(ex) + "\\b", RegexOption.IGNORE_CASE), "")
+            }
+        }
+        lineText = lineText.trim()
+
+        if (lineText.isBlank()) {
+            // Automatically advance if entire line consists of excluded words
+            scope.launch {
+                val nextIndex = index + 1
+                if (nextIndex < lines.size) {
+                    _playerState.value = _playerState.value.copy(currentLineIndex = nextIndex)
+                    speakLine(nextIndex)
+                }
+            }
+            return
+        }
+
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
         }
