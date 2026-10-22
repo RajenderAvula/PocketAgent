@@ -50,7 +50,7 @@ fun PdfFullViewerDialog(
                 if (pfd != null) {
                     val renderer = PdfRenderer(pfd)
                     val rendered = mutableListOf<Bitmap>()
-                    val total = minOf(renderer.pageCount, 25)
+                    val total = minOf(renderer.pageCount, 30)
                     for (i in 0 until total) {
                         val page = renderer.openPage(i)
                         val bmp = Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888)
@@ -101,6 +101,12 @@ fun PdfFullViewerDialog(
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    } else if (pages.isEmpty()) {
+                        Text(
+                            text = "Could not render pages visually. Reading text mode active.",
+                            modifier = Modifier.align(Alignment.Center),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                             items(pages.size) { index ->
