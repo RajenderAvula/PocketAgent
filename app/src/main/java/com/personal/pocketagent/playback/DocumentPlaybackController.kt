@@ -1,6 +1,7 @@
 package com.personal.pocketagent.playback
 
 import android.content.Context
+import android.net.Uri
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -23,6 +24,7 @@ enum class PlaybackState {
 
 data class DocumentPlayerState(
     val title: String = "",
+    val docUri: Uri? = null,
     val lines: List<String> = emptyList(),
     val currentLineIndex: Int = 0,
     val state: PlaybackState = PlaybackState.IDLE
@@ -78,13 +80,14 @@ class DocumentPlaybackController private constructor(private val context: Contex
         }
     }
 
-    fun loadDocument(title: String, rawText: String, startPosition: Int = 0) {
+    fun loadDocument(title: String, rawText: String, startPosition: Int = 0, uri: Uri? = null) {
         stop()
         val parsedLines = splitIntoReadableLines(rawText)
         val safeStart = startPosition.coerceIn(0, (parsedLines.size - 1).coerceAtLeast(0))
 
         _playerState.value = DocumentPlayerState(
             title = title,
+            docUri = uri,
             lines = parsedLines,
             currentLineIndex = safeStart,
             state = PlaybackState.IDLE
