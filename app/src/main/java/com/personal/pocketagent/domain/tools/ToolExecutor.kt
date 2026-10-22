@@ -24,7 +24,6 @@ class ToolExecutor(
         action: AgentAction,
         onStepProgress: (String) -> Unit = {}
     ): String {
-        // Multi-step macro runner execution
         if (action.tool == "run_macro" || action.steps.isNotEmpty()) {
             if (!AgentAccessibilityService.isRunning()) {
                 return "Please enable 'UI Tap' Accessibility first so I can automate app routines."
@@ -44,13 +43,33 @@ class ToolExecutor(
             }
 
             "close_app" -> {
-                val appName = action.args["app_name"] ?: "this app"
+                val appName = (action.args["app_name"] ?: "this app").lowercase().trim()
                 val service = AgentAccessibilityService.instance
+
                 if (service != null) {
-                    service.executeGlobalCommand("home")
-                    "Closed $appName."
+                    if (appName == "apps" || appName == "all apps" || appName == "all") {
+                        service.executeGlobalCommand("recents")
+                        "Opened recent apps so you can clear them."
+                    } else if (appName == "app" || appName == "this app" || appName == "current app") {
+                        service.executeGlobalCommand("back")
+                        "Exited current screen."
+                    } else {
+                        // Return home to close foreground app
+                        service.executeGlobalCommand("home")
+                        "Closed $appName."
+                    }
                 } else {
-                    "Please enable Accessibility to close apps."
+                    // Fallback to launch Home Intent if Accessibility is not active
+                    try {
+                        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                            addCategory(Intent.CATEGORY_HOME)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        context.startActivity(homeIntent)
+                        "Closed $appName."
+                    } catch (_: Exception) {
+                        "Please enable 'UI Tap' Accessibility so PocketAgent can close apps."
+                    }
                 }
             }
 
@@ -175,7 +194,6 @@ class ToolExecutor(
 
         val packageManager = context.packageManager
 
-        // Direct package shortcuts for popular and built-in apps
         val knownPackages = mapOf(
             "whatsapp" to listOf("com.whatsapp", "com.whatsapp.w4b"),
             "facebook" to listOf("com.facebook.katana", "com.facebook.lite"),
@@ -183,7 +201,9 @@ class ToolExecutor(
             "instagram" to listOf("com.instagram.android"),
             "chrome" to listOf("com.android.chrome"),
             "settings" to listOf("com.android.settings"),
-            "spotify" to listOf("com.spotify.music")
+            "spotify" to listOf("com.spotify.music"),
+            "gmail" to listOf("com.google.android.gm"),
+            "maps" to listOf("com.google.android.apps.maps")
         )
 
         knownPackages[cleanName]?.forEach { pkg ->
@@ -195,7 +215,6 @@ class ToolExecutor(
             }
         }
 
-        // Universal scan across all installed launchable apps on device
         val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
