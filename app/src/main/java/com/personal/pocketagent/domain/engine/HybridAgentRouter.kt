@@ -20,7 +20,7 @@ class HybridAgentRouter(
     private val systemPrompt = """
         You are a personal Android agent with multi-step screen macro automation. Respond ONLY in strict JSON:
         {
-          "tool": "run_macro|set_alarm|save_note|list_notes|open_app|click_text|type_text|global_action|chat_reply|ask_notes|analyze_screen|doc_control",
+          "tool": "run_macro|open_app|close_app|doc_control|set_alarm|save_note|list_notes|click_text|type_text|global_action|chat_reply|ask_notes|analyze_screen",
           "args": {"key": "value"},
           "steps": [
             {"action": "open_app|click_text|click_id|type_text|wait_ms|global_action|ime_enter", "target": "...", "value": "...", "timeoutMs": 6000}
@@ -32,6 +32,7 @@ class HybridAgentRouter(
     suspend fun routeInput(input: String, macroDao: MacroDao? = null): Pair<AgentAction, String> {
         val trimmed = input.lowercase().trim()
 
+        // Tier 0: Custom user-saved macros stored in Room
         if (macroDao != null) {
             val customMacro = macroDao.getMacro(trimmed)
             if (customMacro != null) {
@@ -44,8 +45,10 @@ class HybridAgentRouter(
             }
         }
 
+        // Tier 1: Deterministic instant regex and offline reflexes
         parseFastReflex(input)?.let { return it to "OFFLINE-MACRO" }
 
+        // Tier 2: Cloud LLM (Gemini) when online
         if (networkMonitor.isOnline()) {
             try {
                 val rawJson = cloudEngine.generateJsonAction(systemPrompt, input)
@@ -54,6 +57,7 @@ class HybridAgentRouter(
             } catch (_: Exception) {}
         }
 
+        // Tier 3: Local on-device LLM (Gemma 2B) when offline
         if (offlineEngine.initializeIfModelExists()) {
             val rawResponse = offlineEngine.generate("$systemPrompt\nUser: $input\nJSON:")
             return try {
@@ -67,7 +71,7 @@ class HybridAgentRouter(
 
         return AgentAction(
             tool = "chat_reply",
-            spokenResponse = "Offline LLM is not downloaded yet. You can use macros, save notes, search notes, or tap 'Download Offline Model'."
+            spokenResponse = "Offline LLM is not downloaded yet. You can use app commands, macros, notes, or search your saved notes."
         ) to "OFFLINE-FALLBACK"
     }
 
@@ -75,7 +79,7 @@ class HybridAgentRouter(
         val trimmed = input.trim()
         val lower = trimmed.lowercase()
 
-        // Document playback control reflexes
+        // 1. Document Playback Controls
         if (lower == "pause" || lower == "pause reading" || lower == "pause document" || lower == "hold on") {
             return AgentAction(tool = "doc_control", args = mapOf("command" to "pause"), spokenResponse = "Paused.")
         }
@@ -102,6 +106,7 @@ class HybridAgentRouter(
             )
         }
 
+        // 2. Note Natural Language Retrieval / FTS Query
         val searchNotesRegex = Regex(
             "^(?:search\\s+(?:my\\s+)?notes\\s+(?:for|about)|find\\s+(?:in\\s+)?(?:my\\s+)?notes\\s+(?:about|for|on)?|what\\s+did\\s+i\\s+(?:note|save|write)\\s+about|ask\\s+(?:my\\s+)?notes)\\s+(.+)",
             RegexOption.IGNORE_CASE
@@ -115,6 +120,7 @@ class HybridAgentRouter(
             )
         }
 
+        // 3. Screen Summarization and Direct Q&A
         val screenQueryRegex = Regex(
             "^(?:summarize|read|explain|analyze|what is on|solve|answer)\\s+(?:this\\s+|my\\s+|the\\s+)?(?:screen|page|question)(.*)",
             RegexOption.IGNORE_CASE
@@ -130,6 +136,31 @@ class HybridAgentRouter(
             )
         }
 
+        // 4. Close App Reflex
+        val closeRegex = Regex("^(?:close|exit|quit|dismiss)\\s+(.+)", RegexOption.IGNORE_CASE)
+        closeRegex.find(lower)?.let { match ->
+            val appName = match.groupValues[1].trim()
+            return AgentAction(
+                tool = "close_app",
+                args = mapOf("app_name" to appName),
+                spokenResponse = "Closing $appName."
+            )
+        }
+
+        // 5. Open App Reflex
+        val openRegex = Regex("^(?:open|launch|start)\\s+(.+)", RegexOption.IGNORE_CASE)
+        openRegex.find(trimmed)?.let { match ->
+            val appName = match.groupValues[1].trim()
+            if (!appName.contains("whatsapp message", ignoreCase = true)) {
+                return AgentAction(
+                    tool = "open_app",
+                    args = mapOf("app_name" to appName),
+                    spokenResponse = "Opening $appName."
+                )
+            }
+        }
+
+        // 6. WhatsApp Macro Chain
         val waRegex = Regex(
             "(?:send\\s+)?(?:a\\s+)?whatsapp\\s+(?:message\\s+)?(?:to\\s+)?(.+?)\\s+(?:saying|that|with message)\\s+(.+)",
             RegexOption.IGNORE_CASE
@@ -138,6 +169,7 @@ class HybridAgentRouter(
             return buildWhatsAppMacro(match.groupValues[1].trim(), match.groupValues[2].trim())
         }
 
+        // 7. YouTube Search Macro Chain
         val ytRegex = Regex(
             "(?:search youtube for|play\\s+(.+?)\\s+on youtube)(?:\\s*(.+))?",
             RegexOption.IGNORE_CASE
@@ -158,6 +190,7 @@ class HybridAgentRouter(
             }
         }
 
+        // 8. Chained Commands ("... and then ...")
         if (lower.contains(" and then ")) {
             val parts = trimmed.split(Regex("\\s+and then\\s+", RegexOption.IGNORE_CASE))
             val chainedSteps = parts.mapNotNull { singleCommandToStep(it.trim()) }
@@ -170,10 +203,12 @@ class HybridAgentRouter(
             }
         }
 
+        // 9. Backup Trigger
         if (lower.contains("backup") || lower.contains("back up") || lower.contains("export macro") || lower.contains("export data")) {
             return AgentAction(tool = "backup_data", spokenResponse = "Backing up your data to Downloads.")
         }
 
+        // 10. Direct Accessibility Clicks and Text Input
         val clickRegex = Regex("^(?:click|tap|press)\\s+(.+)", RegexOption.IGNORE_CASE)
         clickRegex.find(trimmed)?.let {
             return AgentAction("click_text", mapOf("target" to it.groupValues[1].trim()), spokenResponse = "Clicking ${it.groupValues[1].trim()}.")
@@ -184,6 +219,7 @@ class HybridAgentRouter(
             return AgentAction("type_text", mapOf("text" to it.groupValues[1].trim()), spokenResponse = "Typing ${it.groupValues[1].trim()}.")
         }
 
+        // 11. Navigation Actions
         when {
             lower == "go home" || lower == "home screen" -> return AgentAction("global_action", mapOf("command" to "home"), spokenResponse = "Going home.")
             lower == "go back" || lower == "navigate back" -> return AgentAction("global_action", mapOf("command" to "back"), spokenResponse = "Going back.")
@@ -192,11 +228,7 @@ class HybridAgentRouter(
             lower.contains("open notifications") -> return AgentAction("global_action", mapOf("command" to "notifications"), spokenResponse = "Opening notifications.")
         }
 
-        if (lower.startsWith("open ")) {
-            val app = trimmed.substring(5).trim()
-            return AgentAction("open_app", mapOf("app_name" to app), spokenResponse = "Opening $app.")
-        }
-
+        // 12. Notes & Alarms
         val noteRegex = Regex("^(?:save note|note|remember to|remember)\\s+(.+)", RegexOption.IGNORE_CASE)
         noteRegex.find(trimmed)?.let {
             return AgentAction("save_note", mapOf("content" to it.groupValues[1]), spokenResponse = "Saved to your notes.")
@@ -243,6 +275,7 @@ class HybridAgentRouter(
         val lower = cmd.lowercase()
         return when {
             lower.startsWith("open ") -> MacroStep("open_app", target = cmd.substring(5).trim())
+            lower.startsWith("close ") -> MacroStep("global_action", target = "home")
             lower.startsWith("click ") -> MacroStep("click_text", target = cmd.substring(6).trim())
             lower.startsWith("tap ") -> MacroStep("click_text", target = cmd.substring(4).trim())
             lower.startsWith("type ") -> MacroStep("type_text", value = cmd.substring(5).trim())
@@ -254,13 +287,29 @@ class HybridAgentRouter(
     }
 
     fun buildFtsQuery(rawInput: String): String {
-        val stopWords = setOf("what", "when", "where", "which", "who", "whom", "this", "that", "these", "those", "have", "from", "with", "about", "into", "note", "notes", "saved", "save", "tell", "show", "find", "search", "summary", "screen", "the", "and", "for")
-        val tokens = rawInput.lowercase().replace(Regex("[^a-z0-9\\s]"), " ").split(Regex("\\s+")).filter { it.length >= 3 && it !in stopWords }.distinct()
-        return if (tokens.isEmpty()) rawInput.replace(Regex("[^a-zA-Z0-9]"), "") + "*" else tokens.joinToString(" OR ") { "$it*" }
+        val stopWords = setOf(
+            "what", "when", "where", "which", "who", "whom", "this", "that", "these", "those",
+            "have", "from", "with", "about", "into", "note", "notes", "saved", "save", "tell",
+            "show", "find", "search", "summary", "screen", "the", "and", "for"
+        )
+        val tokens = rawInput.lowercase()
+            .replace(Regex("[^a-z0-9\\s]"), " ")
+            .split(Regex("\\s+"))
+            .filter { it.length >= 3 && it !in stopWords }
+            .distinct()
+
+        return if (tokens.isEmpty()) {
+            rawInput.replace(Regex("[^a-zA-Z0-9]"), "") + "*"
+        } else {
+            tokens.joinToString(" OR ") { "$it*" }
+        }
     }
 
     suspend fun answerFromNotes(userQuestion: String, matchedNotes: List<NoteEntity>): String {
-        if (matchedNotes.isEmpty()) return "I couldn't find any saved notes or screen summaries matching '$userQuestion'."
+        if (matchedNotes.isEmpty()) {
+            return "I couldn't find any saved notes or screen summaries matching '$userQuestion'."
+        }
+
         val contextBlock = matchedNotes.mapIndexed { idx, note ->
             val dateStr = SimpleDateFormat("dd MMM HH:mm", Locale.US).format(Date(note.timestamp))
             "[Note ${idx + 1} - $dateStr]: ${note.content}"
@@ -282,11 +331,14 @@ class HybridAgentRouter(
         if (offlineEngine.initializeIfModelExists()) {
             try {
                 val reply = offlineEngine.generate("$ragPrompt\nAnswer:")
-                if (reply.isNotBlank()) return "${reply.trim()}\n\n📚 Matched ${matchedNotes.size} note(s) (Offline LLM)."
+                if (reply.isNotBlank()) {
+                    return "${reply.trim()}\n\n📚 Matched ${matchedNotes.size} note(s) (Offline LLM)."
+                }
             } catch (_: Exception) {}
         }
 
-        return "Found ${matchedNotes.size} matching note(s):\n\n" + matchedNotes.joinToString("\n\n") { "• ${it.content}" }
+        return "Found ${matchedNotes.size} matching note(s):\n\n" +
+                matchedNotes.joinToString("\n\n") { "• ${it.content}" }
     }
 
     suspend fun analyzeScreenContent(screenText: String, userInstruction: String): Pair<String, String> {
