@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Mic
@@ -27,9 +28,13 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.personal.pocketagent.data.document.DocumentReader
 import com.personal.pocketagent.data.network.DownloadState
+import com.personal.pocketagent.playback.DocumentPlaybackController
 import com.personal.pocketagent.system.AgentTileService
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,8 +48,38 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
     val wakeEnabled by viewModel.wakeServiceEnabled.collectAsState()
     val accessibilityEnabled by viewModel.accessibilityEnabled.collectAsState()
     val overlayEnabled by viewModel.overlayEnabled.collectAsState()
+    val speechRate by viewModel.speechRate.collectAsState()
+    val customWakeWords by viewModel.customWakeWords.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
+    var wakeWordInput by remember(customWakeWords) { mutableStateOf(customWakeWords) }
+    var showWakeConfig by remember { mutableStateOf(false) }
+    var isReadingDoc by remember { mutableStateOf(false) }
+
+    val documentReader = remember { DocumentReader(context) }
+    val playbackController = remember { DocumentPlaybackController.getInstance(context) }
+
+    val docPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            isReadingDoc = true
+            lifecycleOwner.lifecycleScope.launch {
+                val result = documentReader.extractText(uri)
+                isReadingDoc = false
+                result.fold(
+                    onSuccess = { extractedText ->
+                        val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "Document"
+                        playbackController.loadDocument(title = fileName, rawText = extractedText, startPosition = 0)
+                        playbackController.play()
+                    },
+                    onFailure = { error ->
+                        viewModel.submitQuery("Document error: ${error.localizedMessage}")
+                    }
+                )
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -116,6 +151,52 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                         )
                     }
 
+                    // TTS Voice Speed Slider
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text("Assistant Speech Speed: ${"%.2f".format(speechRate)}x", style = MaterialTheme.typography.labelSmall)
+                        Slider(
+                            value = speechRate,
+                            onValueChange = { viewModel.updateSpeechRate(it) },
+                            valueRange = 0.5f..1.5f,
+                            steps = 9
+                        )
+                    }
+
+                    // Custom Wake Word Configuration
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Triggers: ${customWakeWords.split(',').take(3).joinToString(", ") { it.trim() }}...",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        TextButton(onClick = { showWakeConfig = !showWakeConfig }) {
+                            Text(if (showWakeConfig) "Hide" else "Customize")
+                        }
+                    }
+
+                    if (showWakeConfig) {
+                        OutlinedTextField(
+                            value = wakeWordInput,
+                            onValueChange = { wakeWordInput = it },
+                            label = { Text("Wake Phrases (comma-separated)") },
+                            placeholder = { Text("hey man, dude, man, jarvis") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Button(
+                            onClick = {
+                                viewModel.updateCustomWakeWords(wakeWordInput)
+                                showWakeConfig = false
+                            },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("Save Triggers")
+                        }
+                    }
+
                     when (val ds = downloadState) {
                         is DownloadState.NotDownloaded -> {
                             OutlinedButton(onClick = { viewModel.startOfflineModelDownload() }, modifier = Modifier.fillMaxWidth()) {
@@ -151,6 +232,9 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                 }
             }
 
+            // Continuous Line-by-Line Document Player Card
+            DocumentPlayerCard(controller = playbackController)
+
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -174,6 +258,24 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
             }
 
             Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = {
+                        docPickerLauncher.launch(
+                            arrayOf(
+                                "application/pdf",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                "text/plain"
+                            )
+                        )
+                    }
+                ) {
+                    if (isReadingDoc) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.AttachFile, contentDescription = "Read Document")
+                    }
+                }
+
                 OutlinedTextField(
                     value = inputText,
                     onValueChange = { inputText = it },
