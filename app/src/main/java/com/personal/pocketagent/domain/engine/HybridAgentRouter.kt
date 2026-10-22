@@ -30,11 +30,13 @@ class HybridAgentRouter(
     """.trimIndent()
 
     suspend fun routeInput(input: String, macroDao: MacroDao? = null): Pair<AgentAction, String> {
-        val trimmed = input.lowercase().trim()
+        // Strip terminal punctuation from STT or keyboard input (e.g., "close whatsapp." -> "close whatsapp")
+        val cleanInput = input.trim().replace(Regex("[.,?!]+$"), "").trim()
+        val lower = cleanInput.lowercase()
 
         // Tier 0: Custom user-saved macros stored in Room
         if (macroDao != null) {
-            val customMacro = macroDao.getMacro(trimmed)
+            val customMacro = macroDao.getMacro(lower)
             if (customMacro != null) {
                 val steps = jsonParser.decodeFromString<List<MacroStep>>(customMacro.stepsJson)
                 return AgentAction(
@@ -46,12 +48,12 @@ class HybridAgentRouter(
         }
 
         // Tier 1: Deterministic instant regex and offline reflexes
-        parseFastReflex(input)?.let { return it to "OFFLINE-MACRO" }
+        parseFastReflex(cleanInput)?.let { return it to "OFFLINE-MACRO" }
 
         // Tier 2: Cloud LLM (Gemini) when online
         if (networkMonitor.isOnline()) {
             try {
-                val rawJson = cloudEngine.generateJsonAction(systemPrompt, input)
+                val rawJson = cloudEngine.generateJsonAction(systemPrompt, cleanInput)
                 val action = jsonParser.decodeFromString<AgentAction>(rawJson)
                 return action to "ONLINE-CLOUD"
             } catch (_: Exception) {}
@@ -59,7 +61,7 @@ class HybridAgentRouter(
 
         // Tier 3: Local on-device LLM (Gemma 2B) when offline
         if (offlineEngine.initializeIfModelExists()) {
-            val rawResponse = offlineEngine.generate("$systemPrompt\nUser: $input\nJSON:")
+            val rawResponse = offlineEngine.generate("$systemPrompt\nUser: $cleanInput\nJSON:")
             return try {
                 val cleanJson = rawResponse.substringAfter("{").substringBeforeLast("}")
                 val action = jsonParser.decodeFromString<AgentAction>("{$cleanJson}")
@@ -75,9 +77,8 @@ class HybridAgentRouter(
         ) to "OFFLINE-FALLBACK"
     }
 
-    private fun parseFastReflex(input: String): AgentAction? {
-        val trimmed = input.trim()
-        val lower = trimmed.lowercase()
+    private fun parseFastReflex(cleanInput: String): AgentAction? {
+        val lower = cleanInput.lowercase()
 
         // 1. Document Playback Controls
         if (lower == "pause" || lower == "pause reading" || lower == "pause document" || lower == "hold on") {
@@ -97,7 +98,7 @@ class HybridAgentRouter(
         }
 
         val jumpLineRegex = Regex("^(?:read|start|jump|go)\\s+(?:from|to)\\s+line\\s+(\\d+)", RegexOption.IGNORE_CASE)
-        jumpLineRegex.find(trimmed)?.let { match ->
+        jumpLineRegex.find(cleanInput)?.let { match ->
             val lineNumber = match.groupValues[1].toIntOrNull() ?: 1
             return AgentAction(
                 tool = "doc_control",
@@ -106,37 +107,7 @@ class HybridAgentRouter(
             )
         }
 
-        // 2. Note Natural Language Retrieval / FTS Query
-        val searchNotesRegex = Regex(
-            "^(?:search\\s+(?:my\\s+)?notes\\s+(?:for|about)|find\\s+(?:in\\s+)?(?:my\\s+)?notes\\s+(?:about|for|on)?|what\\s+did\\s+i\\s+(?:note|save|write)\\s+about|ask\\s+(?:my\\s+)?notes)\\s+(.+)",
-            RegexOption.IGNORE_CASE
-        )
-        searchNotesRegex.find(trimmed)?.let { match ->
-            val rawTopic = match.groupValues[1].trim()
-            return AgentAction(
-                tool = "ask_notes",
-                args = mapOf("query" to rawTopic, "full_question" to trimmed),
-                spokenResponse = "Searching your notes for $rawTopic."
-            )
-        }
-
-        // 3. Screen Summarization and Direct Q&A
-        val screenQueryRegex = Regex(
-            "^(?:summarize|read|explain|analyze|what is on|solve|answer)\\s+(?:this\\s+|my\\s+|the\\s+)?(?:screen|page|question)(.*)",
-            RegexOption.IGNORE_CASE
-        )
-        screenQueryRegex.find(trimmed)?.let { match ->
-            val extraFocus = match.groupValues[1].trim()
-            val prompt = if (extraFocus.isNotEmpty()) "Analyze the screen and $extraFocus"
-            else "Summarize key points or solve any question on this screen."
-            return AgentAction(
-                tool = "analyze_screen",
-                args = mapOf("instruction" to prompt),
-                spokenResponse = "Analyzing your screen."
-            )
-        }
-
-        // 4. Close App Reflex
+        // 2. Close App / Close Apps Reflex
         val closeRegex = Regex("^(?:close|exit|quit|dismiss)\\s+(.+)", RegexOption.IGNORE_CASE)
         closeRegex.find(lower)?.let { match ->
             val appName = match.groupValues[1].trim()
@@ -147,9 +118,9 @@ class HybridAgentRouter(
             )
         }
 
-        // 5. Open App Reflex
+        // 3. Open App Reflex
         val openRegex = Regex("^(?:open|launch|start)\\s+(.+)", RegexOption.IGNORE_CASE)
-        openRegex.find(trimmed)?.let { match ->
+        openRegex.find(cleanInput)?.let { match ->
             val appName = match.groupValues[1].trim()
             if (!appName.contains("whatsapp message", ignoreCase = true)) {
                 return AgentAction(
@@ -160,12 +131,42 @@ class HybridAgentRouter(
             }
         }
 
+        // 4. Note Natural Language Retrieval / FTS Query
+        val searchNotesRegex = Regex(
+            "^(?:search\\s+(?:my\\s+)?notes\\s+(?:for|about)|find\\s+(?:in\\s+)?(?:my\\s+)?notes\\s+(?:about|for|on)?|what\\s+did\\s+i\\s+(?:note|save|write)\\s+about|ask\\s+(?:my\\s+)?notes)\\s+(.+)",
+            RegexOption.IGNORE_CASE
+        )
+        searchNotesRegex.find(cleanInput)?.let { match ->
+            val rawTopic = match.groupValues[1].trim()
+            return AgentAction(
+                tool = "ask_notes",
+                args = mapOf("query" to rawTopic, "full_question" to cleanInput),
+                spokenResponse = "Searching your notes for $rawTopic."
+            )
+        }
+
+        // 5. Screen Summarization and Direct Q&A
+        val screenQueryRegex = Regex(
+            "^(?:summarize|read|explain|analyze|what is on|solve|answer)\\s+(?:this\\s+|my\\s+|the\\s+)?(?:screen|page|question)(.*)",
+            RegexOption.IGNORE_CASE
+        )
+        screenQueryRegex.find(cleanInput)?.let { match ->
+            val extraFocus = match.groupValues[1].trim()
+            val prompt = if (extraFocus.isNotEmpty()) "Analyze the screen and $extraFocus"
+            else "Summarize key points or solve any question on this screen."
+            return AgentAction(
+                tool = "analyze_screen",
+                args = mapOf("instruction" to prompt),
+                spokenResponse = "Analyzing your screen."
+            )
+        }
+
         // 6. WhatsApp Macro Chain
         val waRegex = Regex(
             "(?:send\\s+)?(?:a\\s+)?whatsapp\\s+(?:message\\s+)?(?:to\\s+)?(.+?)\\s+(?:saying|that|with message)\\s+(.+)",
             RegexOption.IGNORE_CASE
         )
-        waRegex.find(trimmed)?.let { match ->
+        waRegex.find(cleanInput)?.let { match ->
             return buildWhatsAppMacro(match.groupValues[1].trim(), match.groupValues[2].trim())
         }
 
@@ -174,7 +175,7 @@ class HybridAgentRouter(
             "(?:search youtube for|play\\s+(.+?)\\s+on youtube)(?:\\s*(.+))?",
             RegexOption.IGNORE_CASE
         )
-        ytRegex.find(trimmed)?.let { match ->
+        ytRegex.find(cleanInput)?.let { match ->
             val query = (match.groupValues[1].ifEmpty { match.groupValues[2] }).trim()
             if (query.isNotEmpty()) {
                 return AgentAction(
@@ -192,7 +193,7 @@ class HybridAgentRouter(
 
         // 8. Chained Commands ("... and then ...")
         if (lower.contains(" and then ")) {
-            val parts = trimmed.split(Regex("\\s+and then\\s+", RegexOption.IGNORE_CASE))
+            val parts = cleanInput.split(Regex("\\s+and then\\s+", RegexOption.IGNORE_CASE))
             val chainedSteps = parts.mapNotNull { singleCommandToStep(it.trim()) }
             if (chainedSteps.size >= 2) {
                 return AgentAction(
@@ -210,12 +211,12 @@ class HybridAgentRouter(
 
         // 10. Direct Accessibility Clicks and Text Input
         val clickRegex = Regex("^(?:click|tap|press)\\s+(.+)", RegexOption.IGNORE_CASE)
-        clickRegex.find(trimmed)?.let {
+        clickRegex.find(cleanInput)?.let {
             return AgentAction("click_text", mapOf("target" to it.groupValues[1].trim()), spokenResponse = "Clicking ${it.groupValues[1].trim()}.")
         }
 
         val typeRegex = Regex("^(?:type|enter text)\\s+(.+)", RegexOption.IGNORE_CASE)
-        typeRegex.find(trimmed)?.let {
+        typeRegex.find(cleanInput)?.let {
             return AgentAction("type_text", mapOf("text" to it.groupValues[1].trim()), spokenResponse = "Typing ${it.groupValues[1].trim()}.")
         }
 
@@ -230,7 +231,7 @@ class HybridAgentRouter(
 
         // 12. Notes & Alarms
         val noteRegex = Regex("^(?:save note|note|remember to|remember)\\s+(.+)", RegexOption.IGNORE_CASE)
-        noteRegex.find(trimmed)?.let {
+        noteRegex.find(cleanInput)?.let {
             return AgentAction("save_note", mapOf("content" to it.groupValues[1]), spokenResponse = "Saved to your notes.")
         }
 
