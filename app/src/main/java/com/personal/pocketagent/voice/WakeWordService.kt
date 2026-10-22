@@ -45,8 +45,6 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     private lateinit var router: HybridAgentRouter
     private lateinit var toolExecutor: ToolExecutor
 
-    private val wakePhrases = listOf("hey agent", "okay agent", "pocket agent")
-
     override fun onCreate() {
         super.onCreate()
         isRunning = true
@@ -73,7 +71,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("PocketAgent Active")
-            .setContentText("Say 'Hey Agent' followed by your command")
+            .setContentText("Say your trigger word followed by your command")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .build()
@@ -99,12 +97,32 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                 override fun onError(error: Int) { restartListeningWithDelay(800L) }
 
                 override fun onResults(results: Bundle?) {
-                    val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.lowercase()?.trim() ?: ""
-                    val matchedWake = wakePhrases.firstOrNull { spoken.contains(it) }
-                    if (matchedWake != null) {
-                        val command = spoken.substringAfter(matchedWake).trim()
-                        if (command.isNotEmpty()) executeVoiceCommand(command)
-                        else speak("Yes? How can I help?")
+                    val rawSpoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull() ?: ""
+
+                    val cleanSpoken = rawSpoken.lowercase()
+                        .replace(",", " ")
+                        .replace(".", " ")
+                        .replace("?", " ")
+                        .replace("what's app", "whatsapp")
+                        .replace("whats app", "whatsapp")
+                        .replace(Regex("\\s+"), " ")
+                        .trim()
+
+                    val wakePhrases = AgentPrefs.getCustomWakeWordsList(this@WakeWordService)
+                    val wakeRegex = Regex(
+                        "\\b(" + wakePhrases.joinToString("|") { Regex.escape(it) } + ")\\b",
+                        RegexOption.IGNORE_CASE
+                    )
+
+                    val match = wakeRegex.find(cleanSpoken)
+                    if (match != null) {
+                        val command = cleanSpoken.substring(match.range.last + 1).trim()
+                        if (command.isNotEmpty()) {
+                            executeVoiceCommand(command)
+                        } else {
+                            speak("Yes? How can I help?")
+                        }
                     }
                     restartListeningWithDelay(400L)
                 }
@@ -138,12 +156,18 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun speak(text: String) {
-        if (isTtsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "WAKE_AGENT_REPLY")
+        if (isTtsReady) {
+            val rate = AgentPrefs.getSpeechRate(this)
+            tts?.setSpeechRate(rate)
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "WAKE_AGENT_REPLY")
+        }
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.getDefault()
+            val rate = AgentPrefs.getSpeechRate(this)
+            tts?.setSpeechRate(rate)
             isTtsReady = true
         }
     }
