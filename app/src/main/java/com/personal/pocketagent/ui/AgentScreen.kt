@@ -31,6 +31,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.personal.pocketagent.data.document.DocumentReader
+import com.personal.pocketagent.data.local.AgentPrefs
 import com.personal.pocketagent.data.network.DownloadState
 import com.personal.pocketagent.playback.DocumentPlaybackController
 import com.personal.pocketagent.system.AgentTileService
@@ -54,6 +55,7 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
 
     var inputText by remember { mutableStateOf("") }
     var wakeWordInput by remember(customWakeWords) { mutableStateOf(customWakeWords) }
+    var excludedWordsInput by remember { mutableStateOf(AgentPrefs.getExcludedWordsRaw(context)) }
     var showWakeConfig by remember { mutableStateOf(false) }
     var isReadingDoc by remember { mutableStateOf(false) }
 
@@ -174,7 +176,7 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Triggers: ${customWakeWords.split(',').take(3).joinToString(", ") { it.trim() }}...",
+                            text = "Triggers: ${customWakeWords.split(',').take(2).joinToString(", ") { it.trim() }}...",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline
                         )
@@ -191,14 +193,22 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                             placeholder = { Text("hey man, dude, man, jarvis") },
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = excludedWordsInput,
+                            onValueChange = { excludedWordsInput = it },
+                            label = { Text("Exclude PDF Words (comma-separated, e.g. [*, http*, Page *)") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Button(
                             onClick = {
                                 viewModel.updateCustomWakeWords(wakeWordInput)
+                                AgentPrefs.setExcludedWordsRaw(context, excludedWordsInput)
                                 showWakeConfig = false
                             },
                             modifier = Modifier.align(Alignment.End)
                         ) {
-                            Text("Save Triggers")
+                            Text("Save Preferences")
                         }
                     }
 
@@ -237,7 +247,7 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                 }
             }
 
-            // Continuous Line-by-Line Document Player Card with Fullscreen Button
+            // Document Player Card with untruncated scrolling and Close button
             DocumentPlayerCard(
                 controller = playbackController,
                 onOpenFullscreen = {
@@ -246,7 +256,7 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                 }
             )
 
-            // Fullscreen PDF Viewer Dialog
+            // Fullscreen PDF Viewer Dialog with Zoom, Annotate & Line Jump
             activePdfUri?.let { uri ->
                 PdfFullViewerDialog(
                     pdfUri = uri,
