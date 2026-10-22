@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -27,6 +28,7 @@ import com.personal.pocketagent.playback.PlaybackState
 @Composable
 fun DocumentPlayerCard(
     controller: DocumentPlaybackController,
+    onOpenFullscreen: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val playerState by controller.playerState.collectAsState()
@@ -47,6 +49,7 @@ fun DocumentPlayerCard(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Header with Title and Fullscreen Button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -60,13 +63,21 @@ fun DocumentPlayerCard(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+
+                    if (playerState.docUri != null && onOpenFullscreen != null) {
+                        IconButton(onClick = onOpenFullscreen, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Fullscreen, contentDescription = "View Fullscreen", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+
                     Text(
-                        text = "Line ${playerState.currentLineIndex + 1} of ${playerState.totalLines}",
+                        text = "Line ${playerState.currentLineIndex + 1}/${playerState.totalLines}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
 
+                // Spoken Line Preview
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
