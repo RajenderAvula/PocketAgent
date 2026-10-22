@@ -5,13 +5,16 @@ import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import com.google.android.gms.tasks.Task
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.util.zip.ZipInputStream
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class DocumentReader(private val context: Context) {
 
@@ -84,9 +87,9 @@ class DocumentReader(private val context: Context) {
             page.close()
 
             val image = InputImage.fromBitmap(bitmap, 0)
-            val visionText = recognizer.process(image).await()
+            val visionText = recognizer.process(image).awaitTask()
             stringBuilder.append("\n--- Page ${i + 1} ---\n")
-            stringBuilder.append(visionText.text)
+            stringBuilder.append(visionText.text ?: "")
             bitmap.recycle()
         }
 
@@ -97,4 +100,20 @@ class DocumentReader(private val context: Context) {
         if (result.isBlank()) throw Exception("No readable text found in PDF.")
         return result
     }
+
+    /**
+     * Bridges ML Kit / Play Services Tasks directly to Kotlin Coroutines without extra dependencies.
+     */
+    private suspend fun <T> Task<T>.awaitTask(): T =
+        suspendCancellableCoroutine { continuation ->
+            addOnSuccessListener { result ->
+                continuation.resume(result)
+            }
+            addOnFailureListener { exception ->
+                continuation.resumeWithException(exception)
+            }
+            addOnCanceledListener {
+                continuation.cancel()
+            }
+        }
 }
