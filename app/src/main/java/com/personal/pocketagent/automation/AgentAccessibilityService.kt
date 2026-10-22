@@ -163,36 +163,54 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     fun extractVisibleScreenText(maxChars: Int = 3500): String {
-        val targetRoot = findUnderlyingAppRoot() ?: rootInActiveWindow ?: return ""
-        val packageName = targetRoot.packageName?.toString() ?: "unknown.app"
+        return try {
+            val targetRoot = findUnderlyingAppRoot() ?: rootInActiveWindow ?: return ""
+            val packageName = targetRoot.packageName?.toString() ?: "unknown.app"
 
-        val collectedLines = LinkedHashSet<String>()
-        collectNodeText(targetRoot, collectedLines)
+            val collectedLines = LinkedHashSet<String>()
+            collectNodeTextSafely(targetRoot, collectedLines)
 
-        if (collectedLines.isEmpty()) return ""
-        return ("App: $packageName\n" + collectedLines.joinToString("\n")).take(maxChars)
+            if (collectedLines.isEmpty()) return ""
+            ("App: $packageName\n" + collectedLines.joinToString("\n")).take(maxChars)
+        } catch (e: Exception) {
+            "Screen reading error: ${e.localizedMessage}"
+        }
     }
 
     private fun findUnderlyingAppRoot(): AccessibilityNodeInfo? {
         return try {
-            windows?.firstOrNull { window ->
-                val root = window.root
-                val pkg = root?.packageName?.toString() ?: ""
-                pkg.isNotEmpty() && !pkg.contains("pocketagent", ignoreCase = true)
-            }?.root
-        } catch (_: Exception) { null }
+            val currentWindows = windows ?: return null
+            for (window in currentWindows) {
+                val root = window.root ?: continue
+                val pkg = root.packageName?.toString() ?: ""
+                if (pkg.isNotEmpty() && !pkg.contains("pocketagent", ignoreCase = true)) {
+                    return root
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
     }
 
-    private fun collectNodeText(node: AccessibilityNodeInfo?, output: MutableSet<String>) {
-        if (node == null || !node.isVisibleToUser) return
-        val text = node.text?.toString()?.trim()
-        val desc = node.contentDescription?.toString()?.trim()
+    private fun collectNodeTextSafely(node: AccessibilityNodeInfo?, output: MutableSet<String>) {
+        if (node == null) return
+        try {
+            if (!node.isVisibleToUser) return
+            val text = node.text?.toString()?.trim()
+            val desc = node.contentDescription?.toString()?.trim()
 
-        if (!text.isNullOrBlank() && text.length > 1) output.add(text)
-        else if (!desc.isNullOrBlank() && desc.length > 2) output.add("[$desc]")
+            if (!text.isNullOrBlank() && text.length > 1) {
+                output.add(text)
+            } else if (!desc.isNullOrBlank() && desc.length > 2) {
+                output.add("[$desc]")
+            }
 
-        for (i in 0 until node.childCount) {
-            collectNodeText(node.getChild(i), output)
+            for (i in 0 until node.childCount) {
+                collectNodeTextSafely(node.getChild(i), output)
+            }
+        } catch (_: Exception) {
+            // Guard against nodes becoming unlinked or recycled during window transitions
         }
     }
 
