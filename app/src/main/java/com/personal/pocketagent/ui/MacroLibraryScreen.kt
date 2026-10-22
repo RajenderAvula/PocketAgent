@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -71,9 +72,13 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Backup & Restore Quick Action Buttons
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = {
@@ -97,6 +102,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                 }
             }
 
+            // Live Screen Recorder Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -120,6 +126,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                         Text(if (isRecording) "Stop Recording" else "Start Live Screen Recorder")
                     }
 
+                    // Newly Captured / Staged Steps Editor & Preview Area
                     if (stagedSteps.isNotEmpty() && !isRecording) {
                         Text("Review Recorded Steps (${stagedSteps.size})", style = MaterialTheme.typography.titleSmall)
 
@@ -154,7 +161,7 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
                             onClick = { viewModel.testMacroSteps(stagedSteps) { previewStatus = it } },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("▶ Test / Preview Macro Live")
+                            Text("▶ Test / Preview Recorded Steps Live")
                         }
 
                         if (previewStatus.isNotBlank()) {
@@ -184,23 +191,41 @@ fun MacroLibraryScreen(viewModel: MacroRecorderViewModel = viewModel()) {
 
             Text("Saved Routines (${savedMacros.size})", style = MaterialTheme.typography.titleMedium)
 
+            // Saved Macros List with Live Test Run and Delete Options
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(savedMacros, key = { it.triggerPhrase }) { macro ->
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("\"${macro.triggerPhrase}\"", style = MaterialTheme.typography.titleSmall)
-                                Text("Active in offline, chat & wake-word mode", style = MaterialTheme.typography.bodySmall)
-                            }
-                            IconButton(onClick = { viewModel.deleteMacro(macro.triggerPhrase) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("\"${macro.triggerPhrase}\"", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text("Saved routine • Offline ready", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = {
+                                        try {
+                                            val steps = Json.decodeFromString<List<com.personal.pocketagent.domain.model.MacroStep>>(macro.stepsJson)
+                                            viewModel.testMacroSteps(steps) { status ->
+                                                previewStatus = status
+                                            }
+                                        } catch (_: Exception) {}
+                                    }) {
+                                        Text("▶ Test")
+                                    }
+
+                                    IconButton(onClick = { viewModel.deleteMacro(macro.triggerPhrase) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Routine", tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
                             }
                         }
                     }
