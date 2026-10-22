@@ -50,6 +50,7 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
     val overlayEnabled by viewModel.overlayEnabled.collectAsState()
     val speechRate by viewModel.speechRate.collectAsState()
     val customWakeWords by viewModel.customWakeWords.collectAsState()
+    val activePdfUri by viewModel.activePdfUri.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var wakeWordInput by remember(customWakeWords) { mutableStateOf(customWakeWords) }
@@ -64,13 +65,19 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
     ) { uri ->
         if (uri != null) {
             isReadingDoc = true
+            viewModel.setActivePdfUri(uri)
             lifecycleOwner.lifecycleScope.launch {
                 val result = documentReader.extractText(uri)
                 isReadingDoc = false
                 result.fold(
                     onSuccess = { extractedText ->
                         val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "Document"
-                        playbackController.loadDocument(title = fileName, rawText = extractedText, startPosition = 0)
+                        playbackController.loadDocument(
+                            title = fileName,
+                            rawText = extractedText,
+                            startPosition = 0,
+                            uri = uri
+                        )
                         playbackController.play()
                     },
                     onFailure = { error ->
@@ -151,7 +158,6 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                         )
                     }
 
-                    // TTS Voice Speed Slider
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text("Assistant Speech Speed: ${"%.2f".format(speechRate)}x", style = MaterialTheme.typography.labelSmall)
                         Slider(
@@ -162,7 +168,6 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                         )
                     }
 
-                    // Custom Wake Word Configuration
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -232,8 +237,23 @@ fun AgentScreen(viewModel: AgentViewModel = viewModel()) {
                 }
             }
 
-            // Continuous Line-by-Line Document Player Card
-            DocumentPlayerCard(controller = playbackController)
+            // Continuous Line-by-Line Document Player Card with Fullscreen Button
+            DocumentPlayerCard(
+                controller = playbackController,
+                onOpenFullscreen = {
+                    val uri = playbackController.playerState.value.docUri ?: activePdfUri
+                    if (uri != null) viewModel.setActivePdfUri(uri)
+                }
+            )
+
+            // Fullscreen PDF Viewer Dialog
+            activePdfUri?.let { uri ->
+                PdfFullViewerDialog(
+                    pdfUri = uri,
+                    controller = playbackController,
+                    onDismiss = { viewModel.setActivePdfUri(null) }
+                )
+            }
 
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
