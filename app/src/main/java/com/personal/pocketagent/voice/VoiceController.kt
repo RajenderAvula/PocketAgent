@@ -7,6 +7,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import com.personal.pocketagent.data.local.AgentPrefs
 import java.util.Locale
 
 class VoiceController(
@@ -18,6 +19,7 @@ class VoiceController(
     private var speechRecognizer: SpeechRecognizer? = SpeechRecognizer.createSpeechRecognizer(context)
     private var tts: TextToSpeech? = TextToSpeech(context, this)
     private var isTtsReady = false
+    private var speechRate: Float = AgentPrefs.getSpeechRate(context)
 
     init {
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -38,6 +40,12 @@ class VoiceController(
         })
     }
 
+    fun setSpeechRate(rate: Float) {
+        speechRate = rate
+        tts?.setSpeechRate(rate)
+        AgentPrefs.setSpeechRate(context, rate)
+    }
+
     fun startListening(preferOffline: Boolean) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -54,12 +62,16 @@ class VoiceController(
     }
 
     fun speak(text: String) {
-        if (isTtsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "AGENT_UTTERANCE")
+        if (isTtsReady) {
+            tts?.setSpeechRate(speechRate)
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "AGENT_UTTERANCE")
+        }
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.getDefault()
+            tts?.setSpeechRate(speechRate)
             isTtsReady = true
         }
     }
